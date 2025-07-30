@@ -25,7 +25,7 @@ class FiasDatabasePGSQLService
         $password = $_ENV['POSTGRES_DB_PASS'] ?? 'mx_test';
 
         $dsn = "pgsql:host=$host;port=$port;dbname=$dbname";
-        
+
         try {
             $this->pdo = new PDO($dsn, $username, $password, [
                 PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
@@ -41,9 +41,195 @@ class FiasDatabasePGSQLService
     {
         $conditions = [];
         $params = [];
-        
+        $sql = $this->getBaseSearchSQLWithConditions($conditions, $params, $regionName, $cityName, $streetName, $houseNumber);
+
+        if (empty($conditions)) {
+            return [];
+        }
+
+        $whereClause = implode(' AND ', $conditions);
+        $sql .= " WHERE {$whereClause}";
+
+        $sql .= " ORDER BY main.formalname";
+        $sql .= " LIMIT :limit OFFSET :offset";
+
+        $params['limit'] = $limit;
+        $params['offset'] = $offset;
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+
+        return $this->mapToFiasRecordsWithHierarchy($stmt->fetchAll());
+    }
+
+    public function getTotalCount(string $regionName = '', string $cityName = '', string $streetName = '', string $houseNumber = ''): int
+    {
+        $params = [];
+
         $mainLevel = $this->getMainLevel($houseNumber, $streetName, $cityName, $regionName);
-        
+
+        $sql = "SELECT COUNT(*) as total FROM {$this->tableName} main";
+
+        $joins = [];
+
+        if (!empty($regionName)) {
+            $joins[] = "INNER JOIN {$this->tableName} region ON region.regioncode = main.regioncode AND region.aolevel = 1 AND region.actstatus = 1";
+        }
+
+        if (!empty($cityName)) {
+            $joins[] = "INNER JOIN {$this->tableName} city ON city.aoguid = main.parentguid AND city.aolevel = 4 AND city.actstatus = 1";
+        }
+
+        if (!empty($joins)) {
+            $sql .= " " . implode(" ", $joins);
+        }
+
+        $baseConditions = ["main.actstatus = 1"];
+
+        if ($mainLevel > 0) {
+            $baseConditions[] = "main.aolevel = :main_level";
+            $params['main_level'] = $mainLevel;
+        } else {
+            $baseConditions[] = "main.aolevel IN (4, 7)";
+        }
+
+        if (!empty($regionName)) {
+            $baseConditions[] = "region.formalname ILIKE :region_name";
+            $params['region_name'] = "%$regionName%";
+        }
+
+        if (!empty($cityName)) {
+            $baseConditions[] = "city.formalname ILIKE :city_name";
+            $params['city_name'] = "%$cityName%";
+        }
+
+        if (!empty($streetName)) {
+            $baseConditions[] = "main.formalname ILIKE :street_name";
+            $params['street_name'] = "%$streetName%";
+        }
+
+        if (!empty($houseNumber)) {
+            $baseConditions[] = "main.formalname ILIKE :house_number";
+            $params['house_number'] = "%$houseNumber%";
+        }
+
+        if (empty($params) && empty($joins)) {
+            return 0;
+        }
+
+        $sql .= " WHERE " . implode(' AND ', $baseConditions);
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+
+        $result = $stmt->fetch();
+        return (int)$result['total'];
+    }
+
+    public function mapToFiasRecordsWithHierarchy(array $data): array
+    {
+        return array_map(static function ($row) {
+            // Создаем базовую запись
+            $record = FiasRecord::fromArray($row);
+
+            // Добавляем информацию об иерархии из JOIN'ов
+            $record->region_name = $row['region_name'] ?? '';
+            $record->region_shortname = $row['region_shortname'] ?? '';
+            $record->city_name = $row['city_name'] ?? '';
+            $record->city_shortname = $row['city_shortname'] ?? '';
+            $record->street_name = $row['street_name'] ?? '';
+            $record->street_shortname = $row['street_shortname'] ?? '';
+            $record->house_name = $row['house_name'] ?? '';
+            $record->house_shortname = $row['house_shortname'] ?? '';
+
+            return $record;
+        }, $data);
+    }
+
+    private function getMainLevel(string $houseNumber = '', string $streetName = '', string $cityName = '', string $regionName = ''): int
+    {
+        $mainLevel = 0;
+        if (!empty($houseNumber)) {
+            $mainLevel = 8; // Дом
+        } elseif (!empty($streetName)) {
+            $mainLevel = 7; // Улица
+        } elseif (!empty($cityName)) {
+            $mainLevel = 7; // При поиске по городу показываем улицы этого города
+        }
+
+        return $mainLevel;
+    }
+
+    private function getParamsAndConditions(int $mainLevel, string $regionName, string $cityName, string $streetName, string $houseNumber, array &$params, array &$conditions): void
+    {
+        if ($mainLevel > 0) {
+            $params['main_level'] = $mainLevel;
+        }
+
+        if (!empty($regionName)) {
+            $conditions[] = "LOWER(region.region_name) ILIKE :region_name";
+            $params['region_name'] = "%$regionName%";
+        }
+
+        if (!empty($cityName)) {
+            $conditions[] = "LOWER(city.city_name) ILIKE :city_name";
+            $params['city_name'] = "%$cityName%";
+        }
+
+        if (!empty($streetName)) {
+            $conditions[] = "LOWER(main.formalname) ILIKE :street_name";
+            $params['street_name'] = "%$streetName%";
+        }
+
+        if (!empty($houseNumber)) {
+            $conditions[] = "LOWER(main.formalname) ILIKE :house_number";
+            $params['house_number'] = "%$houseNumber%";
+        }
+    }
+
+    public function testConnection(): bool
+    {
+        try {
+            $this->pdo->query('SELECT 1');
+            return true;
+        } catch (PDOException $e) {
+            return false;
+        }
+    }
+
+    public function getAllResults(string $regionName = '', string $cityName = '', string $streetName = '', string $houseNumber = ''): array
+    {
+        $conditions = [];
+        $params = [];
+        $sql = $this->getBaseSearchSQLWithConditions($conditions, $params, $regionName, $cityName, $streetName, $houseNumber);
+
+        if (!empty($conditions)) {
+            $whereClause = implode(' AND ', $conditions);
+            $sql .= " WHERE {$whereClause}";
+        }
+
+        $sql .= " ORDER BY main.formalname";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+
+        return $this->mapToFiasRecordsWithHierarchy($stmt->fetchAll());
+    }
+
+    private function getBaseSearchSQLWithConditions(
+        array  &$conditions,
+        array  &$params,
+        string $regionName = '',
+        string $cityName = '',
+        string $streetName = '',
+        string $houseNumber = '',
+    ): string
+    {
+        $conditions = [];
+        $params = [];
+
+        $mainLevel = $this->getMainLevel($houseNumber, $streetName, $cityName, $regionName);
+
         $sql = "
             WITH main_data AS (
                 SELECT 
@@ -100,165 +286,9 @@ class FiasDatabasePGSQLService
                 main.aolevel = 8 AND house.aoguid = main.aoguid
             )
         ";
-        
+
         $this->getParamsAndConditions($mainLevel, $regionName, $cityName, $streetName, $houseNumber, $params, $conditions);
-        
-        // Если нет условий поиска, возвращаем пустой массив
-        if (empty($conditions)) {
-            return [];
-        }
-        
-        if (!empty($conditions)) {
-            $whereClause = implode(' AND ', $conditions);
-            $sql .= " WHERE {$whereClause}";
-        }
-        
-        $sql .= " ORDER BY main.formalname";
-        $sql .= " LIMIT :limit OFFSET :offset";
-        
-        $params['limit'] = $limit;
-        $params['offset'] = $offset;
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($params);
-        
-        return $this->mapToFiasRecordsWithHierarchy($stmt->fetchAll());
-    }
-    
-    public function getTotalCount(string $regionName = '', string $cityName = '', string $streetName = '', string $houseNumber = ''): int
-    {
-        $params = [];
-        
-        $mainLevel = $this->getMainLevel($houseNumber, $streetName, $cityName, $regionName);
-        
-        $sql = "SELECT COUNT(*) as total FROM {$this->tableName} main";
-        
-        $joins = [];
-        
-        if (!empty($regionName)) {
-            $joins[] = "INNER JOIN {$this->tableName} region ON region.regioncode = main.regioncode AND region.aolevel = 1 AND region.actstatus = 1";
-        }
-        
-        if (!empty($cityName)) {
-            $joins[] = "INNER JOIN {$this->tableName} city ON city.aoguid = main.parentguid AND city.aolevel = 4 AND city.actstatus = 1";
-        }
 
-        if (!empty($joins)) {
-            $sql .= " " . implode(" ", $joins);
-        }
-        
-        $baseConditions = ["main.actstatus = 1"];
-        
-        if ($mainLevel > 0) {
-            $baseConditions[] = "main.aolevel = :main_level";
-            $params['main_level'] = $mainLevel;
-        } else {
-            $baseConditions[] = "main.aolevel IN (4, 7)";
-        }
-        
-        if (!empty($regionName)) {
-            $baseConditions[] = "region.formalname ILIKE :region_name";
-            $params['region_name'] = "%$regionName%";
-        }
-        
-        if (!empty($cityName)) {
-            $baseConditions[] = "city.formalname ILIKE :city_name";
-            $params['city_name'] = "%$cityName%";
-        }
-        
-        if (!empty($streetName)) {
-            $baseConditions[] = "main.formalname ILIKE :street_name";
-            $params['street_name'] = "%$streetName%";
-        }
-        
-        if (!empty($houseNumber)) {
-            $baseConditions[] = "main.formalname ILIKE :house_number";
-            $params['house_number'] = "%$houseNumber%";
-        }
-        
-        if (empty($params) && empty($joins)) {
-            return 0;
-        }
-        
-        $sql .= " WHERE " . implode(' AND ', $baseConditions);
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($params);
-        
-        $result = $stmt->fetch();
-        return (int) $result['total'];
-    }
-
-    private function mapToFiasRecordsWithHierarchy(array $data): array
-    {
-        return array_map(function($row) {
-            // Создаем базовую запись
-            $record = FiasRecord::fromArray($row);
-            
-            // Добавляем информацию об иерархии из JOIN'ов
-            $record->region_name = $row['region_name'] ?? '';
-            $record->region_shortname = $row['region_shortname'] ?? '';
-            $record->city_name = $row['city_name'] ?? '';
-            $record->city_shortname = $row['city_shortname'] ?? '';
-            $record->street_name = $row['street_name'] ?? '';
-            $record->street_shortname = $row['street_shortname'] ?? '';
-            $record->house_name = $row['house_name'] ?? '';
-            $record->house_shortname = $row['house_shortname'] ?? '';
-            
-            return $record;
-        }, $data);
-    }
-
-    private function getParamsAndConditions(int $mainLevel, string $regionName, string $cityName, string $streetName, string $houseNumber, array &$params, array &$conditions): void
-    {
-        if ($mainLevel > 0) {
-            $params['main_level'] = $mainLevel;
-        }
-
-        if (!empty($regionName)) {
-            $conditions[] = "region.region_name ILIKE :region_name";
-            $params['region_name'] = "%$regionName%";
-        }
-
-        if (!empty($cityName)) {
-            $conditions[] = "city.city_name ILIKE :city_name";
-            $params['city_name'] = "%$cityName%";
-        }
-
-        if (!empty($streetName)) {
-            $conditions[] = "main.formalname ILIKE :street_name";
-            $params['street_name'] = "%$streetName%";
-        }
-
-        if (!empty($houseNumber)) {
-            $conditions[] = "main.formalname ILIKE :house_number";
-            $params['house_number'] = "%$houseNumber%";
-        }
-    }
-
-    private function getMainLevel(string $houseNumber = '', string $streetName = '', string $cityName = '', string $regionName = ''): int
-    {
-        $mainLevel = 0;
-        if (!empty($houseNumber)) {
-            $mainLevel = 8; // Дом
-        } elseif (!empty($streetName)) {
-            $mainLevel = 7; // Улица
-        } elseif (!empty($cityName)) {
-            $mainLevel = 7; // При поиске по городу показываем улицы этого города
-        } elseif (!empty($regionName)) {
-            $mainLevel = 0; // При поиске по региону показываем города и улицы
-        }
-
-        return $mainLevel;
-    }
-
-    public function testConnection(): bool
-    {
-        try {
-            $this->pdo->query('SELECT 1');
-            return true;
-        } catch (PDOException $e) {
-            return false;
-        }
+        return $sql;
     }
 } 

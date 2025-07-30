@@ -36,6 +36,59 @@ class MariaDbService
         }
     }
 
+    public function saveAddresses(array $addresses): int
+    {
+        if (empty($addresses)) {
+            return 0;
+        }
+
+        $sql = "
+            INSERT INTO {$this->tableName} 
+            (full_address) 
+            VALUES (?)
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $savedCount = 0;
+
+        foreach ($addresses as $address) {
+            try {
+                $fullAddress = $this->buildFullAddress($address);
+
+                $stmt->execute([$fullAddress]);
+
+                $savedCount++;
+            } catch (PDOException $e) {
+                error_log("Ошибка сохранения адреса: " . $e->getMessage());
+            }
+        }
+
+        return $savedCount;
+    }
+
+    private function buildFullAddress($address): string
+    {
+        $parts = [];
+
+        if (!empty($address->region_name)) {
+            $parts[] = ($address->region_shortname ?? '') . ' ' . $address->region_name;
+        }
+
+        if (!empty($address->city_name)) {
+            $parts[] = ($address->city_shortname ?? '') . ' ' . $address->city_name;
+        }
+
+        if (!empty($address->street_name)) {
+            $parts[] = ($address->street_shortname ?? '') . ' ' . $address->street_name;
+        }
+
+        if (!empty($address->house_name)) {
+            $parts[] = ($address->house_shortname ?? '') . ' ' . $address->house_name;
+        }
+
+        return implode(', ', $parts);
+    }
+
     public function testConnection(): bool
     {
         try {

@@ -26,8 +26,10 @@ class Router
         }
 
         return match ($path) {
-            '/' => (new MainController($this->request))->index(),
-            '/api/search' => (new MainController($this->request))->apiSearch(),
+            '/' => new MainController($this->request)->index(),
+            '/api/search' => new MainController($this->request)->apiSearch(),
+            '/api/save-current-page' => new MainController($this->request)->apiSaveCurrentPage(),
+            '/api/save-all-results' => new MainController($this->request)->apiSaveAllResults(),
             default => new Response(
                 '<h1>404 - Страница не найдена</h1><p>Запрашиваемая страница не существует.</p><a href="/">Вернуться на главную</a>',
                 404

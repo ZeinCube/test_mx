@@ -3,11 +3,25 @@
 namespace App\Controller;
 
 use App\Database\FiasDatabasePGSQLService;
+use App\Database\MariaDbService;
+use App\Model\Pagination;
 use Symfony\Component\HttpFoundation\JsonResponse;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 class MainController extends BaseController
 {
+    private FiasDatabasePGSQLService $fiasDatabasePGSQLService;
+    private MariaDbService $mariaDbService;
+
+    public function __construct(Request $request)
+    {
+        parent::__construct($request);
+
+        $this->fiasDatabasePGSQLService = new FiasDatabasePGSQLService();
+        $this->mariaDbService = new MariaDbService();
+    }
+
     public function index(): Response
     {
         $fiasService = new FiasDatabasePGSQLService();
@@ -99,6 +113,15 @@ class MainController extends BaseController
                 
                 <div id="results" class="results" style="display: none;">
                     <h3 id="resultsTitle">📋 Результаты поиска</h3>
+                    <div style="margin-bottom: 15px;">
+                        <button id="saveCurrentPageBtn" class="btn" style="background: #17a2b8;" onclick="saveCurrentPage()" disabled>
+                            💾 Сохранить эту страницу
+                        </button>
+                        <button id="saveAllResultsBtn" class="btn" style="background: #28a745;" onclick="saveAllResults()" disabled>
+                            💾 Сохранить все результаты
+                        </button>
+                        <span id="saveStatus" style="margin-left: 10px; font-size: 14px;"></span>
+                    </div>
                     <table id="resultsTable">
                         <thead>
                             <tr>
@@ -130,7 +153,8 @@ class MainController extends BaseController
                     <h3>ℹ️ Информация о системе:</h3>
                     <p><strong>PHP версия:</strong> ' . PHP_VERSION . '</p>
                     <p><strong>Время загрузки:</strong> ' . date('Y-m-d H:i:s') . '</p>
-                    <p><strong>Статус БД:</strong> ' . ($fiasService->testConnection() ? '✅ Подключено' : '❌ Ошибка подключения') . '</p>
+                    <p><strong>Статус PostgreSQL:</strong> ' . ($fiasService->testConnection() ? '✅ Подключено' : '❌ Ошибка подключения') . '</p>
+                    <p><strong>Статус MariaDB:</strong> ' . (class_exists('\App\Database\MariaDbService') ? $this->mariaDbService->testConnection() ? '✅ Подключено' : '❌ Ошибка подключения' : '❌ Сервис недоступен') . '</p>
                 </div>
             </div>
             
@@ -139,6 +163,7 @@ class MainController extends BaseController
                 let totalPages = 1;
                 let totalCount = 0;
                 let currentSearchParams = "";
+                let currentResults = [];
                 
                 function clearForm() {
                     document.getElementById("region").value = "";
@@ -147,6 +172,7 @@ class MainController extends BaseController
                     document.getElementById("house").value = "";
                     hideResults();
                     currentPage = 1;
+                    currentResults = [];
                 }
                 
                 function showLoading() {
@@ -182,8 +208,13 @@ class MainController extends BaseController
                         resultsTitle.textContent = "🔍 По вашему запросу ничего не найдено";
                         document.getElementById("results").style.display = "block";
                         document.getElementById("pagination").style.display = "none";
+                        document.getElementById("saveCurrentPageBtn").disabled = true;
+                        document.getElementById("saveAllResultsBtn").disabled = true;
+                        currentResults = [];
                         return;
                     }
+                    
+                    currentResults = data;
                     
                     currentPage = pagination.current_page;
                     totalPages = pagination.total_pages;
@@ -212,6 +243,10 @@ class MainController extends BaseController
                     });
                     
                     updatePagination();
+                    
+                    document.getElementById("saveCurrentPageBtn").disabled = false;
+                    document.getElementById("saveAllResultsBtn").disabled = false;
+                    document.getElementById("saveStatus").textContent = "";
                     
                     document.getElementById("results").style.display = "block";
                 }
@@ -322,6 +357,107 @@ class MainController extends BaseController
                     currentPage = 1; 
                     performSearch();
                 });
+
+                function saveCurrentPage() {
+                    if (currentResults.length === 0) {
+                        showSaveStatus("Нет результатов для сохранения", "error");
+                        return;
+                    }
+                    
+                    const saveBtn = document.getElementById("saveCurrentPageBtn");
+                    const saveStatus = document.getElementById("saveStatus");
+                    
+                    saveBtn.disabled = true;
+                    saveStatus.textContent = "Сохранение текущей страницы...";
+                    saveStatus.style.color = "#17a2b8";
+                    
+                    fetch("/api/save-current-page", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify({
+                            addresses: currentResults
+                        })
+                    })
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error("HTTP " + response.status);
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (data.success) {
+                            showSaveStatus(data.message, "success");
+                        } else {
+                            showSaveStatus(data.error || "Ошибка сохранения", "error");
+                        }
+                    })
+                    .catch(error => {
+                        showSaveStatus("Ошибка при сохранении: " + error.message, "error");
+                    })
+                    .finally(() => {
+                        saveBtn.disabled = false;
+                    });
+                }
+
+                function saveAllResults() {
+                    if (currentResults.length === 0) {
+                        showSaveStatus("Нет результатов для сохранения", "error");
+                        return;
+                    }
+                    
+                    const saveBtn = document.getElementById("saveAllResultsBtn");
+                    const saveStatus = document.getElementById("saveStatus");
+                    
+                    saveBtn.disabled = true;
+                    saveStatus.textContent = "Сохранение всех результатов...";
+                    saveStatus.style.color = "#28a745";
+                    
+                    const formData = new FormData(document.getElementById("searchForm"));
+                    const params = new URLSearchParams();
+                    
+                    for (let [key, value] of formData.entries()) {
+                        if (value.trim()) {
+                            params.append(key, value.trim());
+                        }
+                    }
+                    
+                    fetch("/api/save-all-results", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify({
+                            searchParams: Object.fromEntries(params)
+                        })
+                    })
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error("HTTP " + response.status);
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (data.success) {
+                            showSaveStatus(data.message, "success");
+                        } else {
+                            showSaveStatus(data.error || "Ошибка сохранения", "error");
+                        }
+                    })
+                    .catch(error => {
+                        showSaveStatus("Ошибка при сохранении: " + error.message, "error");
+                    })
+                    .finally(() => {
+                        saveBtn.disabled = false;
+                    });
+                }
+                
+                function showSaveStatus(message, type) {
+                    const saveStatus = document.getElementById("saveStatus");
+                    saveStatus.textContent = message;
+                    saveStatus.style.color = type === "success" ? "#28a745" : "#dc3545";
+                }
             </script>
         </body>
         </html>';
@@ -340,31 +476,112 @@ class MainController extends BaseController
             $limit = max(1, min(1000, (int) $this->request->query->get('limit', 100)));
             $offset = ($page - 1) * $limit;
 
-            $databaseService = new FiasDatabasePGSQLService();
-            
-            if (!$databaseService->testConnection()) {
+
+            if (!$this->fiasDatabasePGSQLService->testConnection()) {
                 return new JsonResponse([
                     'error' => 'Ошибка подключения к базе данных'
                 ], 500);
             }
 
-            $results = $databaseService->search($regionName, $cityName, $streetName, $houseNumber, $offset, $limit);
-            $totalCount = $databaseService->getTotalCount($regionName, $cityName, $streetName, $houseNumber);
+            $results = $this->fiasDatabasePGSQLService->search($regionName, $cityName, $streetName, $houseNumber, $offset, $limit);
+            $totalCount = $this->fiasDatabasePGSQLService->getTotalCount($regionName, $cityName, $streetName, $houseNumber);
             
-            $totalPages = ceil($totalCount / $limit);
+            $pagination = Pagination::create($page, $limit, $totalCount);
 
             return new JsonResponse([
                 'success' => true,
                 'data' => $results,
-                'pagination' => [
-                    'current_page' => $page,
-                    'total_pages' => $totalPages,
-                    'total_count' => $totalCount,
-                    'limit' => $limit,
-                    'offset' => $offset,
-                    'has_next' => $page < $totalPages,
-                    'has_prev' => $page > 1
-                ]
+                'pagination' => $pagination->toArray()
+            ]);
+
+        } catch (\Exception $e) {
+            return new JsonResponse([
+                'error' => 'Внутренняя ошибка сервера: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function apiSaveCurrentPage(): JsonResponse
+    {
+        try {
+            $content = json_decode($this->request->getContent(), true);
+            
+            if (!isset($content['addresses']) || !is_array($content['addresses'])) {
+                return new JsonResponse([
+                    'error' => 'Неверный формат данных'
+                ], 400);
+            }
+            
+            if (!$this->mariaDbService->testConnection()) {
+                return new JsonResponse([
+                    'error' => 'Ошибка подключения к MariaDB'
+                ], 500);
+            }
+            
+            $addresses = $this->fiasDatabasePGSQLService->mapToFiasRecordsWithHierarchy($content['addresses']);
+
+            $savedCount = $this->mariaDbService->saveAddresses($addresses);
+            
+            return new JsonResponse([
+                'success' => true,
+                'message' => "Сохранено $savedCount адресов с текущей страницы",
+                'saved_count' => $savedCount
+            ]);
+
+        } catch (\Exception $e) {
+            return new JsonResponse([
+                'error' => 'Внутренняя ошибка сервера: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function apiSaveAllResults(): JsonResponse
+    {
+        try {
+            $content = json_decode($this->request->getContent(), true);
+            
+            if (!isset($content['searchParams']) || !is_array($content['searchParams'])) {
+                return new JsonResponse([
+                    'error' => 'Неверный формат данных'
+                ], 400);
+            }
+            
+            $searchParams = $content['searchParams'];
+            
+            if (!$this->fiasDatabasePGSQLService->testConnection()) {
+                return new JsonResponse([
+                    'error' => 'Ошибка подключения к PostgreSQL'
+                ], 500);
+            }
+            
+            $allResults = $this->fiasDatabasePGSQLService->getAllResults(
+                $searchParams['region'] ?? '',
+                $searchParams['city'] ?? '',
+                $searchParams['street'] ?? '',
+                $searchParams['house'] ?? ''
+            );
+            
+            if (empty($allResults)) {
+                return new JsonResponse([
+                    'success' => true,
+                    'message' => 'Нет результатов для сохранения',
+                    'saved_count' => 0
+                ]);
+            }
+            
+            if (!$this->mariaDbService->testConnection()) {
+                return new JsonResponse([
+                    'error' => 'Ошибка подключения к MariaDB'
+                ], 500);
+            }
+            
+            $savedCount = $this->mariaDbService->saveAddresses($allResults);
+            
+            return new JsonResponse([
+                'success' => true,
+                'message' => "Сохранено $savedCount адресов из всех результатов поиска",
+                'saved_count' => $savedCount,
+                'total_found' => count($allResults)
             ]);
 
         } catch (\Exception $e) {

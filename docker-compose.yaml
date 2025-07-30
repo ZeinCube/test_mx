@@ -16,7 +16,7 @@ services:
             context: .
             dockerfile: docker/php/Dockerfile.php
         volumes:
-            - .:/var/www/project
+            - .:/var/www/html
         environment:
             PHP_IDE_CONFIG: "serverName=test_mx"
         extra_hosts:
