@@ -44,8 +44,8 @@ class MariaDbService
 
         $sql = "
             INSERT INTO {$this->tableName} 
-            (full_address) 
-            VALUES (?)
+            (region, city, street, house) 
+            VALUES (?, ?, ?, ?)
         ";
 
         $stmt = $this->pdo->prepare($sql);
@@ -53,9 +53,12 @@ class MariaDbService
 
         foreach ($addresses as $address) {
             try {
-                $fullAddress = $this->buildFullAddress($address);
+                $region = $this->extractRegionName($address);
+                $city = $this->extractCityName($address);
+                $street = $this->extractStreetName($address);
+                $house = $this->extractHouseName($address);
 
-                $stmt->execute([$fullAddress]);
+                $stmt->execute([$region, $city, $street, $house]);
 
                 $savedCount++;
             } catch (PDOException $e) {
@@ -66,27 +69,36 @@ class MariaDbService
         return $savedCount;
     }
 
-    private function buildFullAddress($address): string
+    private function extractRegionName($address): string
     {
-        $parts = [];
-
         if (!empty($address->region_name)) {
-            $parts[] = ($address->region_shortname ?? '') . ' ' . $address->region_name;
+            return ($address->region_shortname ?? '') . ' ' . $address->region_name;
         }
+        return '';
+    }
 
+    private function extractCityName($address): string
+    {
         if (!empty($address->city_name)) {
-            $parts[] = ($address->city_shortname ?? '') . ' ' . $address->city_name;
+            return ($address->city_shortname ?? '') . ' ' . $address->city_name;
         }
+        return '';
+    }
 
+    private function extractStreetName($address): string
+    {
         if (!empty($address->street_name)) {
-            $parts[] = ($address->street_shortname ?? '') . ' ' . $address->street_name;
+            return ($address->street_shortname ?? '') . ' ' . $address->street_name;
         }
+        return '';
+    }
 
+    private function extractHouseName($address): string
+    {
         if (!empty($address->house_name)) {
-            $parts[] = ($address->house_shortname ?? '') . ' ' . $address->house_name;
+            return ($address->house_shortname ?? '') . ' ' . $address->house_name;
         }
-
-        return implode(', ', $parts);
+        return '';
     }
 
     public function testConnection(): bool

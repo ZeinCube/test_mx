@@ -222,6 +222,15 @@ class DatabaseMigration
             $result = $this->mariadbPdo->query("SELECT COUNT(*) as total FROM plain_addresses");
             $total = $result->fetch()['total'];
             echo "MariaDB: $total сохраненных адресов в plain_addresses\n";
+            
+            if ($total > 0) {
+                $result = $this->mariadbPdo->query("SELECT region, city, street, house, created_at FROM plain_addresses ORDER BY created_at DESC LIMIT 3");
+                $recent = $result->fetchAll();
+                echo "Последние сохраненные адреса:\n";
+                foreach ($recent as $row) {
+                    echo "  - {$row['region']}, {$row['city']}, {$row['street']}, {$row['house']} ({$row['created_at']})\n";
+                }
+            }
         } catch (PDOException $e) {
             echo "Ошибка получения статистики MariaDB: " . $e->getMessage() . "\n";
         }
