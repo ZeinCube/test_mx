@@ -3,7 +3,8 @@
     "description": "Test MX Application",
     "type": "project",
     "require": {
-        "symfony/http-foundation": "^7.0"
+        "symfony/http-foundation": "^7.0",
+        "ext-pdo": "*"
     },
     "autoload": {
         "psr-4": {

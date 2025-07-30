@@ -56,35 +56,4 @@ class FiasRecord
             enddate: $data['enddate']
         );
     }
-
-    public function toArray(): array
-    {
-        return [
-            'aoid' => $this->aoid,
-            'formalname' => $this->formalname,
-            'regioncode' => $this->regioncode,
-            'offname' => $this->offname,
-            'postalcode' => $this->postalcode,
-            'aolevel' => $this->aolevel,
-            'parentguid' => $this->parentguid,
-            'aoguid' => $this->aoguid,
-            'shortname' => $this->shortname,
-            'actstatus' => $this->actstatus,
-            'startdate' => $this->startdate,
-            'enddate' => $this->enddate,
-            'region_name' => $this->region_name,
-            'region_shortname' => $this->region_shortname,
-            'city_name' => $this->city_name,
-            'city_shortname' => $this->city_shortname,
-            'street_name' => $this->street_name,
-            'street_shortname' => $this->street_shortname,
-            'house_name' => $this->house_name,
-            'house_shortname' => $this->house_shortname
-        ];
-    }
-
-    public function getFullName(): string
-    {
-        return trim($this->shortname . ' ' . $this->formalname);
-    }
-} 
+}

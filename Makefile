@@ -7,20 +7,26 @@ DOTENV_FILE:=.env.local
 
 COMPOSE=docker compose --env-file ${DOTENV_FILE} ${COMPOSE_LOCAL_FILE}
 
-env: ## Create .env.local file from .env
-	@[ -f ./${DOTENV_FILE} ] \
- 	&& (echo "${YELLOW}Env file ${DOTENV_FILE} already exists!${NC}"; exit 0) \
- 	|| (cp -n .env ${DOTENV_FILE}; echo "${GREEN}New ${DOTENV_FILE} file created!\n${YELLOW}Please configure a new file first and rerun command!${NC}"; exit 1 )
+.PHONY: help build up down restart logs migrate test
 
-migrate: env
-	@echo "Running migrations..."
-	./data/scripts/run_migrations_docker.sh
+help: ## Показать справку
+	@echo "Доступные команды:"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-c-inst: env ## Run composer install
-	@$(EXEC) composer install
+build: ## Собрать Docker образы
+	docker compose build
 
-up: env
-	@echo "Starting docker containers..."
-	@$(COMPOSE) up -d
-	${THIS_FILE} migrate
-	${THIS_FILE} c-inst
+up: ## Запустить контейнеры
+	docker compose up -d
+
+down: ## Остановить контейнеры
+	docker compose down
+
+restart: ## Перезапустить контейнеры
+	docker compose restart
+
+logs: ## Показать логи контейнеров
+	docker compose logs -f
+
+migrate: ## Запустить миграции базы данных
+	docker exec -it test_mx-php-fpm-1 php /var/www/html/data/scripts/run_migrations.php
