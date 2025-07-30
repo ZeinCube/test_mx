@@ -67,6 +67,42 @@ class DatabaseMigration
         echo "\n✅ Все миграции выполнены успешно!\n";
     }
     
+    public function runFreshMigrations(): void
+    {
+        echo "\n🔄 Полное перенакатывание миграций...\n";
+        
+        // Удаляем существующие таблицы
+        $this->dropExistingTables();
+        
+        // Запускаем миграции заново
+        $this->runMigrations();
+        
+        echo "\n✅ Все миграции перенакатаны успешно!\n";
+    }
+    
+    private function dropExistingTables(): void
+    {
+        echo "\n🗑️  Удаление существующих таблиц...\n";
+        
+        // Удаляем таблицы PostgreSQL
+        try {
+            $this->pgsqlPdo->exec("DROP TABLE IF EXISTS d_fias_addrobj CASCADE");
+            echo "✅ PostgreSQL: Таблица d_fias_addrobj удалена\n";
+        } catch (PDOException $e) {
+            echo "⚠️  PostgreSQL: Ошибка удаления таблицы d_fias_addrobj: " . $e->getMessage() . "\n";
+        }
+        
+        // Удаляем таблицы MariaDB
+        try {
+            $this->mariadbPdo->exec("DROP TABLE IF EXISTS plain_addresses");
+            echo "✅ MariaDB: Таблица plain_addresses удалена\n";
+        } catch (PDOException $e) {
+            echo "⚠️  MariaDB: Ошибка удаления таблицы plain_addresses: " . $e->getMessage() . "\n";
+        }
+        
+        echo "\n";
+    }
+    
     private function runPostgresMigrations(): void
     {
         echo "\n📊 Выполнение миграций PostgreSQL...\n";
@@ -204,5 +240,15 @@ if (file_exists($envFile)) {
 }
 
 $migration = new DatabaseMigration();
-$migration->runMigrations();
+
+// Проверяем аргументы командной строки
+$isFresh = in_array('--fresh', $argv);
+
+if ($isFresh) {
+    echo "\n🔄 Режим полного перенакатывания миграций\n";
+    $migration->runFreshMigrations();
+} else {
+    $migration->runMigrations();
+}
+
 $migration->showDatabaseStats(); 

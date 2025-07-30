@@ -7,7 +7,7 @@ DOTENV_FILE:=.env.local
 
 COMPOSE=docker compose --env-file ${DOTENV_FILE} ${COMPOSE_LOCAL_FILE}
 
-.PHONY: help build up down restart logs migrate test
+.PHONY: help build up down restart logs migrate migrate-fresh test
 
 help: ## Показать справку
 	@echo "Доступные команды:"
@@ -30,3 +30,6 @@ logs: ## Показать логи контейнеров
 
 migrate: ## Запустить миграции базы данных
 	docker exec -it test_mx-php-fpm-1 php /var/www/html/data/scripts/run_migrations.php
+
+migrate-fresh: ## Полностью перенакатить миграции (удалить и пересоздать таблицы)
+	docker exec -it test_mx-php-fpm-1 php /var/www/html/data/scripts/run_migrations.php --fresh
